@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>English Daily Reader</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div id="app">
+  <!-- Header -->
+  <header class="header">
+    <h1 class="logo">English Daily Reader</h1>
+    <nav class="tabs">
+      <button class="tab active" data-tab="reading">阅读</button>
+      <button class="tab" data-tab="vocabulary">生词本</button>
+      <button class="tab" data-tab="settings">设置</button>
+    </nav>
+  </header>
+
+  <!-- Reading Tab -->
+  <main id="tab-reading" class="tab-content active">
+    <!-- Controls -->
+    <div class="controls-card">
+      <div class="date-row">
+        <label>日期</label>
+        <input type="date" id="reading-date" class="date-input">
+      </div>
+
+      <div class="topic-row">
+        <label for="topic-input">我想阅读关于...</label>
+        <div class="topic-input-wrap">
+          <input type="text" id="topic-input" class="topic-input"
+                 placeholder="近期热点 (默认)"
+                 autocomplete="off">
+          <button id="topic-history-btn" class="history-btn" title="历史主题">&#9660;</button>
+          <div id="topic-dropdown" class="topic-dropdown hidden"></div>
+        </div>
+      </div>
+
+      <div class="sliders-row">
+        <div class="slider-group">
+          <label>每段词数: <span id="words-val">50</span> 词</label>
+          <div class="slider-wrap">
+            <input type="range" id="words-slider" min="20" max="120" value="50" step="5">
+            <input type="number" id="words-input" min="20" max="120" value="50" class="num-input">
+          </div>
+        </div>
+        <div class="slider-group">
+          <label>生成段数: <span id="count-val">10</span> 段</label>
+          <div class="slider-wrap">
+            <input type="range" id="count-slider" min="1" max="30" value="10" step="1">
+            <input type="number" id="count-input" min="1" max="30" value="10" class="num-input">
+          </div>
+        </div>
+      </div>
+
+      <button id="generate-btn" class="btn-primary">生成英语片段</button>
+      <div id="generate-status" class="status"></div>
+    </div>
+
+    <!-- Segments -->
+    <div id="segments-container"></div>
+    <div id="load-more-wrap" class="load-more-wrap hidden">
+      <button id="load-more-btn" class="btn-secondary">继续生成更多...</button>
+    </div>
+  </main>
+
+  <!-- Vocabulary Tab -->
+  <main id="tab-vocabulary" class="tab-content">
+    <div class="vocab-header">
+      <div class="vocab-stats">
+        <span id="vocab-total">共 0 词</span>
+        <span id="vocab-unmastered">未掌握 0 词</span>
+      </div>
+      <div class="vocab-filters">
+        <button class="filter-btn active" data-filter="all">全部</button>
+        <button class="filter-btn" data-filter="unmastered">未掌握</button>
+        <button class="filter-btn" data-filter="mastered">已掌握</button>
+      </div>
+      <input type="text" id="vocab-search" class="search-input" placeholder="搜索单词...">
+    </div>
+    <div id="vocab-list" class="vocab-list"></div>
+  </main>
+
+  <!-- Settings Tab -->
+  <main id="tab-settings" class="tab-content">
+    <div class="settings-card">
+      <h3>API 配置</h3>
+      <div class="form-group">
+        <label>API Key</label>
+        <input type="password" id="setting-api-key" class="form-input"
+               placeholder="sk-...">
+        <span class="hint" id="api-key-status"></span>
+      </div>
+      <div class="form-group">
+        <label>API URL (OpenAI 兼容接口)</label>
+        <input type="text" id="setting-api-url" class="form-input"
+               placeholder="https://api.deepseek.com/v1">
+      </div>
+    </div>
+
+    <div class="settings-card">
+      <h3>生成默认值</h3>
+      <div class="slider-group">
+        <label>每段词数: <span id="setting-words-val">50</span> 词</label>
+        <div class="slider-wrap">
+          <input type="range" id="setting-words-slider" min="20" max="120" value="50" step="5">
+          <input type="number" id="setting-words-input" min="20" max="120" value="50" class="num-input">
+        </div>
+      </div>
+      <div class="slider-group">
+        <label>每次段数: <span id="setting-count-val">10</span> 段</label>
+        <div class="slider-wrap">
+          <input type="range" id="setting-count-slider" min="1" max="30" value="10" step="1">
+          <input type="number" id="setting-count-input" min="1" max="30" value="10" class="num-input">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>默认难度</label>
+        <div class="radio-group">
+          <label><input type="radio" name="difficulty" value="beginner"> 初级</label>
+          <label><input type="radio" name="difficulty" value="intermediate" checked> 中级</label>
+          <label><input type="radio" name="difficulty" value="advanced"> 高级</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-card">
+      <h3>默认主题 (留空则使用"近期热点")</h3>
+      <input type="text" id="setting-default-topic" class="form-input"
+             placeholder="输入默认感兴趣的主题...">
+      <div class="topic-chips" id="saved-topics-chips"></div>
+    </div>
+
+    <div class="settings-card">
+      <h3>生词融入</h3>
+      <label class="checkbox-label">
+        <input type="checkbox" id="setting-vocab-integration" checked>
+        生成时融入生词本词汇
+      </label>
+      <div class="slider-group" id="vocab-count-group">
+        <label>每次融入数量: <span id="setting-vocab-count-val">8</span> 个</label>
+        <div class="slider-wrap">
+          <input type="range" id="setting-vocab-count-slider" min="1" max="10" value="8" step="1">
+          <input type="number" id="setting-vocab-count-input" min="1" max="10" value="8" class="num-input">
+        </div>
+      </div>
+    </div>
+
+    <button id="save-settings-btn" class="btn-primary">保存设置</button>
+    <div id="settings-status" class="status"></div>
+  </main>
+
+  <!-- Dictionary Popover -->
+  <div id="dict-popover" class="dict-popover hidden">
+    <div class="dict-content">
+      <div class="dict-word"></div>
+      <div class="dict-phonetic"></div>
+      <div class="dict-meanings"></div>
+      <button id="dict-add-vocab" class="btn-small">+ 加入生词本</button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

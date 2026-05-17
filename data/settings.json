@@ -1,0 +1,11 @@
+{
+  "api_key": "",
+  "api_base_url": "https://api.deepseek.com/v1",
+  "segmentCount": 10,
+  "wordsPerSegment": 50,
+  "difficulty": "intermediate",
+  "savedTopics": [],
+  "defaultTopic": "__HOT_TOPICS__",
+  "vocabIntegration": true,
+  "vocabIntegrationCount": 8
+}
