@@ -103,6 +103,10 @@ function initPanels() {
   // Apply initial state
   toggleLeftPanel(false);
   toggleRightPanel(true);
+
+  // Init drag gestures for mobile panels
+  initPanelDrag('left-panel');
+  initPanelDrag('right-panel');
 }
 
 function toggleLeftPanel(open) {
@@ -116,9 +120,12 @@ function toggleLeftPanel(open) {
     if (window.innerWidth <= 768 && rightPanelOpen) {
       toggleRightPanel(false);
     }
+    lockBodyScroll(true);
   } else {
     leftPanel.classList.add('collapsed');
+    leftPanel.classList.remove('expanded');
     btn.classList.remove('active');
+    lockBodyScroll(false);
   }
 
   updateOverlay();
@@ -136,18 +143,93 @@ function toggleRightPanel(open) {
     if (window.innerWidth <= 768 && leftPanelOpen) {
       toggleLeftPanel(false);
     }
+    lockBodyScroll(true);
   } else {
     rightPanel.classList.add('collapsed');
+    rightPanel.classList.remove('expanded');
     btn.classList.remove('active');
+    lockBodyScroll(false);
   }
 
   updateOverlay();
   updateLayoutClass();
 }
 
+// ---- Body scroll lock (mobile panels) ----
+let _scrollTop = 0;
+
+function lockBodyScroll(lock) {
+  if (window.innerWidth > 768) return;
+  if (lock) {
+    _scrollTop = window.scrollY;
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.top = `-${_scrollTop}px`;
+  } else {
+    document.body.style.overflow = '';
+    document.body.style.position = '';
+    document.body.style.width = '';
+    document.body.style.top = '';
+    window.scrollTo(0, _scrollTop);
+  }
+}
+
+// ---- Panel drag gesture (mobile) ----
+function initPanelDrag(panelId) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+
+  const handle = panel.querySelector('.panel-drag-handle');
+  if (!handle) return;
+
+  let startY = 0;
+  let startHeight = 0;
+  let dragging = false;
+
+  handle.addEventListener('touchstart', (e) => {
+    if (window.innerWidth > 768) return;
+    startY = e.touches[0].clientY;
+    startHeight = panel.getBoundingClientRect().height;
+    panel.style.transition = 'none';
+    dragging = true;
+  }, { passive: true });
+
+  panel.addEventListener('touchmove', (e) => {
+    if (!dragging || window.innerWidth > 768) return;
+    const dy = startY - e.touches[0].clientY; // positive = swipe up
+    const newHeight = Math.min(window.innerHeight * 0.95, Math.max(100, startHeight + dy));
+    panel.style.height = newHeight + 'px';
+  }, { passive: true });
+
+  panel.addEventListener('touchend', (e) => {
+    if (!dragging || window.innerWidth > 768) return;
+    dragging = false;
+    panel.style.transition = '';
+    const endY = e.changedTouches[0].clientY;
+    const totalDy = startY - endY;
+
+    // Swipe down > 80px or height < 30vh → close
+    if (totalDy < -80 || panel.getBoundingClientRect().height < window.innerHeight * 0.3) {
+      if (panelId === 'left-panel') toggleLeftPanel(false);
+      else toggleRightPanel(false);
+      return;
+    }
+
+    // Swipe up > 80px → expand to full
+    if (totalDy > 80) {
+      panel.classList.add('expanded');
+    } else {
+      panel.classList.remove('expanded');
+    }
+    panel.style.height = '';
+  });
+}
+
 function updateOverlay() {
   const overlay = document.getElementById('overlay');
-  if (leftPanelOpen || rightPanelOpen) {
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile && (leftPanelOpen || rightPanelOpen)) {
     overlay.classList.remove('hidden');
   } else {
     overlay.classList.add('hidden');
@@ -170,9 +252,10 @@ function updateLayoutClass() {
 }
 
 window.addEventListener('resize', () => {
-  // Close all panels when resizing to mobile to avoid stale state
-  if (window.innerWidth <= 768 && (leftPanelOpen || rightPanelOpen)) {
-    // keep panels open, they just render differently
+  // Hide overlay when resizing to desktop
+  if (window.innerWidth > 768) {
+    document.getElementById('overlay').classList.add('hidden');
+    lockBodyScroll(false);
   }
   updateLayoutClass();
 });
@@ -712,6 +795,10 @@ async function showWordInPanel(word) {
     if (existing && existing.definition_cn) {
       const translateContent = document.getElementById('def-translate-content');
       translateContent.innerHTML = `<div class="def-google-translation">${escapeHtml(existing.definition_cn)}</div>`;
+    } else if (data.llm_translation && data.llm_translation.translation_cn) {
+      // Auto LLM translation from server (e.g. Render without local DB)
+      const translateContent = document.getElementById('def-translate-content');
+      translateContent.innerHTML = `<div class="def-google-translation">${escapeHtml(data.llm_translation.translation_cn)}</div>`;
     }
   } catch (err) {
     content.querySelector('.word-panel-phonetic').textContent = '查询失败';

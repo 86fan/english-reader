@@ -237,6 +237,16 @@ def dictionary():
 
         d = Dictionary()
         result = d.lookup(word)
+
+        # Auto LLM translate when local dictionary is unavailable (e.g. Render cloud)
+        if not result.get("local"):
+            api_key = _get_api_key()
+            if api_key:
+                api_base = _get_settings().get("api_base_url", "") or DEFAULT_API_BASE
+                d2 = Dictionary(llm_api_key=api_key, llm_base_url=api_base)
+                llm = d2.translate_llm(word)
+                result["llm_translation"] = llm
+
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": f"Dictionary lookup failed: {str(e)}"}), 500
