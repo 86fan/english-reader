@@ -1,5 +1,23 @@
 /* === English Daily Reader - Frontend Logic === */
 
+// ===================== LOCAL STORAGE HELPERS =====================
+function readLS(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function writeLS(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    showToast('存储空间不足，请清理浏览器数据');
+  }
+}
+
 // ===================== STATE =====================
 let currentTab = 'reading';
 let currentFilter = 'all';
@@ -8,18 +26,41 @@ let settingsData = {};
 let expandedWord = null;
 let currentReadingDate = '';
 let currentReadingTopic = '';
-let currentWordContext = null; // {date, segmentId, sentence} — set when clicking word in segment
+let currentWordContext = null;
 
-let currentDictWord = '';    // word currently shown in left panel
+let currentDictWord = '';
 
 // Panel state
 let leftPanelOpen = false;
 let rightPanelOpen = true;
 
+// ===================== DEFAULT SETTINGS =====================
+const DEFAULT_SETTINGS = {
+  api_key: '',
+  api_base_url: '',
+  segmentCount: 10,
+  wordsPerSegment: 50,
+  difficulty: 'cet6',
+  defaultTopic: '__HOT_TOPICS__',
+  savedTopics: [],
+  vocabIntegration: true,
+  vocabIntegrationCount: 8,
+  wordClickMode: 'double',
+};
+const DEFAULT_VOCABULARY = { words: [] };
+
 // ===================== INIT =====================
 document.addEventListener('DOMContentLoaded', () => {
   const today = new Date().toISOString().split('T')[0];
   currentReadingDate = today;
+
+  // Load data from localStorage first
+  settingsData = readLS('er_settings', { ...DEFAULT_SETTINGS });
+  vocabData = readLS('er_vocabulary', { words: [] });
+  // Calculate stats
+  vocabData.total = vocabData.words.length;
+  vocabData.unmastered = vocabData.words.filter(w => !w.mastered).length;
+  vocabData.mastered = vocabData.total - vocabData.unmastered;
 
   initTabs();
   initPanels();
@@ -32,18 +73,18 @@ document.addEventListener('DOMContentLoaded', () => {
   initVocabulary();
   initSettings();
   initBackToToday();
-  loadSettings();
-  loadVocab();
+
+  populateSettingsForm();
+  syncReadingTabSliders();
+  loadVocabUI();
   loadHistoryPanel();
+  loadReading(today);
 
   // Exit button
   document.getElementById('exit-btn').addEventListener('click', async () => {
     try { await fetch('/api/shutdown', { method: 'POST' }); } catch (e) {}
     window.close();
   });
-
-  // Load today's reading by default
-  loadReading(today);
 });
 
 // ===================== TABS =====================
@@ -56,19 +97,19 @@ function initTabs() {
       const tabId = btn.dataset.tab;
       document.getElementById(`tab-${tabId}`).classList.add('active');
       currentTab = tabId;
-      // Reset right panel title based on tab
       const titleEl = document.getElementById('right-panel-title');
       if (tabId === 'reading') {
         if (titleEl) titleEl.textContent = '历史阅读';
         loadHistoryPanel();
       } else if (tabId === 'vocabulary') {
         if (titleEl) titleEl.textContent = '出处片段';
-        loadVocab();
-        // Show placeholder in right panel
+        loadVocabUI();
         const histContent = document.getElementById('history-panel-content');
         if (histContent) histContent.innerHTML = '<p class="history-empty">点击左侧单词<br>查看出处片段</p>';
       }
-      if (tabId === 'settings') loadSettings();
+      if (tabId === 'settings') {
+        // Refresh settings display
+      }
     });
   });
 }
@@ -82,7 +123,6 @@ function initPanels() {
   const rightBtn = document.getElementById('toggle-right-panel');
   const overlay = document.getElementById('overlay');
 
-  // Close buttons
   document.getElementById('close-left-panel').addEventListener('click', () => {
     toggleLeftPanel(false);
   });
@@ -90,23 +130,27 @@ function initPanels() {
     toggleRightPanel(false);
   });
 
-  // Header toggle buttons
   leftBtn.addEventListener('click', () => toggleLeftPanel(!leftPanelOpen));
   rightBtn.addEventListener('click', () => toggleRightPanel(!rightPanelOpen));
 
-  // Overlay click closes panels
   overlay.addEventListener('click', () => {
     if (leftPanelOpen) toggleLeftPanel(false);
     if (rightPanelOpen) toggleRightPanel(false);
   });
 
-  // Apply initial state
   toggleLeftPanel(false);
   toggleRightPanel(true);
 
-  // Init drag gestures for mobile panels
   initPanelDrag('left-panel');
   initPanelDrag('right-panel');
+
+  if (window.innerWidth > 768) {
+    initDesktopPanelDrag('left-panel');
+    initDesktopPanelDrag('right-panel');
+    initDesktopPanelResize('left-panel');
+    initDesktopPanelResize('right-panel');
+    _desktopPanelsInited = true;
+  }
 }
 
 function toggleLeftPanel(open) {
@@ -197,7 +241,7 @@ function initPanelDrag(panelId) {
 
   panel.addEventListener('touchmove', (e) => {
     if (!dragging || window.innerWidth > 768) return;
-    const dy = startY - e.touches[0].clientY; // positive = swipe up
+    const dy = startY - e.touches[0].clientY;
     const newHeight = Math.min(window.innerHeight * 0.95, Math.max(100, startHeight + dy));
     panel.style.height = newHeight + 'px';
   }, { passive: true });
@@ -209,20 +253,131 @@ function initPanelDrag(panelId) {
     const endY = e.changedTouches[0].clientY;
     const totalDy = startY - endY;
 
-    // Swipe down > 80px or height < 30vh → close
     if (totalDy < -80 || panel.getBoundingClientRect().height < window.innerHeight * 0.3) {
       if (panelId === 'left-panel') toggleLeftPanel(false);
       else toggleRightPanel(false);
       return;
     }
 
-    // Swipe up > 80px → expand to full
     if (totalDy > 80) {
       panel.classList.add('expanded');
     } else {
       panel.classList.remove('expanded');
     }
     panel.style.height = '';
+  });
+}
+
+// ---- Desktop panel drag (mouse) ----
+function initDesktopPanelDrag(panelId) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+
+  const header = panel.querySelector('.panel-header');
+  if (!header) return;
+
+  let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+  let dragging = false;
+
+  header.addEventListener('mousedown', (e) => {
+    if (window.innerWidth <= 768) return;
+    if (e.target.closest('.panel-close')) return;
+    dragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = panel.offsetLeft;
+    startTop = panel.offsetTop;
+    panel.style.transition = 'none';
+    panel.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    let newLeft = startLeft + dx;
+    let newTop = startTop + dy;
+
+    const maxX = window.innerWidth - panel.offsetWidth - 8;
+    const maxY = window.innerHeight - 60;
+    newLeft = Math.max(0, Math.min(newLeft, maxX));
+    newTop = Math.max(0, Math.min(newTop, maxY));
+
+    panel.style.left = newLeft + 'px';
+    panel.style.top = newTop + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    panel.style.cursor = '';
+  });
+}
+
+// ---- Desktop panel resize (mouse) ----
+function initDesktopPanelResize(panelId) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+
+  ['e', 's', 'se'].forEach(dir => {
+    if (!panel.querySelector(`.panel-resize-handle.${dir}`)) {
+      const handle = document.createElement('div');
+      handle.className = `panel-resize-handle ${dir}`;
+      panel.appendChild(handle);
+    }
+  });
+
+  let resizing = false;
+  let currentDir = '';
+  let startX = 0, startY = 0, startW = 0, startH = 0;
+
+  panel.addEventListener('mousedown', (e) => {
+    if (window.innerWidth <= 768) return;
+    const handle = e.target.closest('.panel-resize-handle');
+    if (!handle) return;
+    resizing = true;
+    currentDir = [...handle.classList].find(c => ['e', 's', 'se'].includes(c)) || '';
+    startX = e.clientX;
+    startY = e.clientY;
+    startW = panel.offsetWidth;
+    startH = panel.offsetHeight;
+    panel.style.transition = 'none';
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!resizing) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+
+    if (currentDir.includes('e')) {
+      panel.style.width = Math.max(260, startW + dx) + 'px';
+    }
+    if (currentDir.includes('s')) {
+      panel.style.height = Math.max(180, startH + dy) + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    resizing = false;
+    currentDir = '';
+  });
+}
+
+function clampPanelsToViewport() {
+  if (window.innerWidth <= 768) return;
+  ['left-panel', 'right-panel'].forEach(id => {
+    const panel = document.getElementById(id);
+    if (!panel || panel.classList.contains('collapsed')) return;
+    const rect = panel.getBoundingClientRect();
+    const maxX = window.innerWidth - rect.width - 8;
+    const maxY = window.innerHeight - 60;
+    if (rect.left > maxX) panel.style.left = maxX + 'px';
+    if (rect.left < 0) panel.style.left = '0px';
+    if (rect.top > maxY) panel.style.top = maxY + 'px';
+    if (rect.top < 0) panel.style.top = '0px';
   });
 }
 
@@ -239,25 +394,25 @@ function updateOverlay() {
 function updateLayoutClass() {
   const layout = document.getElementById('main-layout');
   layout.classList.remove('left-collapsed', 'both-collapsed', 'right-collapsed', 'left-visible', 'right-visible');
-
-  if (window.innerWidth <= 768) return; // mobile uses single column + overlay
-
-  if (!leftPanelOpen && !rightPanelOpen) {
-    layout.classList.add('both-collapsed');
-  } else if (!leftPanelOpen) {
-    layout.classList.add('left-collapsed');
-  } else if (!rightPanelOpen) {
-    layout.classList.add('right-collapsed');
-  }
+  if (window.innerWidth <= 768) return;
 }
 
+let _desktopPanelsInited = false;
+
 window.addEventListener('resize', () => {
-  // Hide overlay when resizing to desktop
   if (window.innerWidth > 768) {
     document.getElementById('overlay').classList.add('hidden');
     lockBodyScroll(false);
+    if (!_desktopPanelsInited) {
+      initDesktopPanelDrag('left-panel');
+      initDesktopPanelDrag('right-panel');
+      initDesktopPanelResize('left-panel');
+      initDesktopPanelResize('right-panel');
+      _desktopPanelsInited = true;
+    }
   }
   updateLayoutClass();
+  clampPanelsToViewport();
 });
 
 // ===================== TOAST =====================
@@ -362,13 +517,32 @@ function initGenerate() {
   document.getElementById('generate-btn').addEventListener('click', generate);
 }
 
-async function generate() {
-  const btn = document.getElementById('generate-btn');
-  const status = document.getElementById('generate-status');
-
+function _buildGenerateBody() {
   const topic = document.getElementById('topic-input').value.trim();
   const wordsPerSegment = parseInt(document.getElementById('words-input').value);
   const count = parseInt(document.getElementById('count-input').value);
+
+  const unmastered = vocabData.words
+    .filter(w => !w.mastered)
+    .sort((a, b) => (a.reviewCount || 0) - (b.reviewCount || 0))
+    .map(w => w.word);
+
+  return {
+    topic: topic || null,
+    wordsPerSegment,
+    count,
+    difficulty: settingsData.difficulty || 'cet6',
+    defaultTopic: settingsData.defaultTopic || '__HOT_TOPICS__',
+    api_base_url: settingsData.api_base_url || '',
+    vocabIntegration: settingsData.vocabIntegration !== false,
+    vocabIntegrationCount: settingsData.vocabIntegrationCount || 8,
+    vocabWords: unmastered,
+  };
+}
+
+async function generate() {
+  const btn = document.getElementById('generate-btn');
+  const status = document.getElementById('generate-status');
 
   btn.disabled = true;
   btn.textContent = '生成中...';
@@ -379,11 +553,7 @@ async function generate() {
     const resp = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        topic: topic || null,
-        wordsPerSegment,
-        count,
-      }),
+      body: JSON.stringify(_buildGenerateBody()),
     });
 
     const data = await resp.json();
@@ -392,27 +562,45 @@ async function generate() {
       throw new Error(data.error || '生成失败');
     }
 
-    currentReadingDate = data.date;
-    currentReadingTopic = data.topic || topic || '近期热点';
+    const reading = data.reading;
+    currentReadingDate = reading.date;
+    currentReadingTopic = reading.topic || '近期热点';
 
-    if (data.topic && data.topic !== '__HOT_TOPICS__') {
-      addToSavedTopics(data.topic);
+    if (reading.topic && reading.topic !== '__HOT_TOPICS__') {
+      addToSavedTopics(reading.topic);
     }
 
-    renderSegments(data.segments);
+    // Save to localStorage
+    const allReadings = readLS('er_readings', {});
+    if (allReadings[reading.date] && allReadings[reading.date].segments) {
+      // Merge with existing
+      const existing = allReadings[reading.date];
+      const startId = existing.segments.length;
+      reading.segments.forEach((seg, i) => { seg.id = startId + i; });
+      existing.segments = reading.segments;
+      existing.generatedAt = reading.generatedAt;
+      existing.topic = reading.topic;
+      existing.topics = existing.topics || [];
+      existing.topics.push({ topic: reading.topic, segmentCount: reading.segments.length - startId });
+    } else {
+      reading.topics = [{ topic: reading.topic, segmentCount: reading.segments.length }];
+      allReadings[reading.date] = reading;
+    }
+    writeLS('er_readings', allReadings);
+
+    renderSegments(reading.segments);
     document.getElementById('load-more-wrap').classList.remove('hidden');
-    status.textContent = `已生成 ${data.segments.length} 段 | `;
+    status.textContent = `已生成 ${reading.segments.length} 段 | `;
     status.className = 'status success';
 
     if (data.missingVocab && data.missingVocab.length > 0) {
       status.textContent += ` 未融入生词: ${data.missingVocab.join(', ')}`;
     }
 
-    // Auto-scroll to segments so user can see results and load-more button
     document.getElementById('segments-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     showToast('生成完成!');
-    loadVocab();
+    loadVocabUI();
     loadHistoryPanel();
   } catch (err) {
     status.textContent = `错误: ${err.message}`;
@@ -443,7 +631,6 @@ function renderSegments(segments) {
     const wordCount = seg.english ? seg.english.split(/\s+/).length : 0;
     index.textContent = `第 ${idx + 1} 段 · ${wordCount} 词`;
 
-    // Check for sentence-pair format
     if (seg.sentences && seg.sentences.length > 0) {
       const enDiv = document.createElement('div');
       enDiv.className = 'segment-en';
@@ -468,7 +655,6 @@ function renderSegments(segments) {
       card.appendChild(index);
       card.appendChild(enDiv);
     } else {
-      // Backward compat: old format without sentence pairs
       const enDiv = document.createElement('div');
       enDiv.className = 'segment-en-full';
       enDiv.innerHTML = tokenizeEnglish(seg.english);
@@ -482,7 +668,6 @@ function renderSegments(segments) {
       card.appendChild(zhDiv);
     }
 
-    // Keywords
     if (seg.keywords && seg.keywords.length > 0) {
       const kwDiv = document.createElement('div');
       kwDiv.className = 'segment-kw';
@@ -497,11 +682,9 @@ function renderSegments(segments) {
 }
 
 function tokenizeEnglish(text) {
-  // Phase 1: Replace **...** markers with <strong> tags
   let html = escapeHtml(text);
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 
-  // Phase 2: Wrap non-tag words in <span class="word">
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
 
@@ -570,30 +753,27 @@ async function loadReading(dateStr) {
   const backBar = document.getElementById('back-to-today-bar');
   const backLabel = document.getElementById('back-to-today-label');
 
-  try {
-    const resp = await fetch(`/api/readings/${dateStr}`);
-    if (!resp.ok) {
-      container.innerHTML = '<p style="text-align:center;color:#999;">该日期暂无阅读内容</p>';
-      loadMore.classList.add('hidden');
-      backBar.classList.add('hidden');
-      return;
-    }
-    const data = await resp.json();
-    currentReadingTopic = data.topic || '';
-    renderSegments(data.segments);
+  const allReadings = readLS('er_readings', {});
+  const data = allReadings[dateStr];
 
-    const today = new Date().toISOString().split('T')[0];
-    if (dateStr === today) {
-      loadMore.classList.remove('hidden');
-      backBar.classList.add('hidden');
-    } else {
-      loadMore.classList.add('hidden');
-      backBar.classList.remove('hidden');
-      backLabel.textContent = `正在查看 ${dateStr} 的历史阅读`;
-    }
-  } catch (err) {
-    container.innerHTML = '<p style="text-align:center;color:#c0392b;">加载失败</p>';
+  if (!data || !data.segments) {
+    container.innerHTML = '<p style="text-align:center;color:#999;">该日期暂无阅读内容</p>';
+    loadMore.classList.add('hidden');
     backBar.classList.add('hidden');
+    return;
+  }
+
+  currentReadingTopic = data.topic || '';
+  renderSegments(data.segments);
+
+  const today = new Date().toISOString().split('T')[0];
+  if (dateStr === today) {
+    loadMore.classList.remove('hidden');
+    backBar.classList.add('hidden');
+  } else {
+    loadMore.classList.add('hidden');
+    backBar.classList.remove('hidden');
+    backLabel.textContent = `正在查看 ${dateStr} 的历史阅读`;
   }
 }
 
@@ -602,7 +782,6 @@ function initBackToToday() {
     const today = new Date().toISOString().split('T')[0];
     currentReadingDate = today;
     loadReading(today);
-    // Update history panel highlight
     const content = document.getElementById('history-panel-content');
     if (content) {
       content.querySelectorAll('.history-item').forEach(el => el.classList.remove('current'));
@@ -622,22 +801,44 @@ function initLoadMore() {
 
     const topic = currentReadingTopic || document.getElementById('topic-input').value.trim();
     const wordsPerSegment = parseInt(document.getElementById('words-input').value);
-    const count = 5;
+    const count = parseInt(document.getElementById('count-input').value) || (settingsData.segmentCount || 5);
+
+    // Get existing reading to append to
+    const allReadings = readLS('er_readings', {});
+    const existingReading = allReadings[currentReadingDate] || {};
+
+    const body = {
+      topic: topic || null,
+      wordsPerSegment,
+      count,
+      difficulty: settingsData.difficulty || 'cet6',
+      defaultTopic: settingsData.defaultTopic || '__HOT_TOPICS__',
+      api_base_url: settingsData.api_base_url || '',
+      vocabIntegration: settingsData.vocabIntegration !== false,
+      vocabIntegrationCount: settingsData.vocabIntegrationCount || 8,
+      vocabWords: vocabData.words.filter(w => !w.mastered).map(w => w.word),
+      existingReading: existingReading,
+    };
 
     try {
-      const resp = await fetch('/api/generate', {
+      const resp = await fetch('/api/generate-more', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: topic || null, wordsPerSegment, count }),
+        body: JSON.stringify(body),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || '生成失败');
-      renderSegments(data.segments);
-      showToast('已追加!');
-      loadVocab();
+
+      // Save merged reading to localStorage
+      const updatedReading = data.reading;
+      allReadings[currentReadingDate] = updatedReading;
+      writeLS('er_readings', allReadings);
+
+      renderSegments(updatedReading.segments);
+      showToast(`已追加 ${data.appendedCount} 段!`);
+      loadVocabUI();
       loadHistoryPanel();
 
-      // Auto-scroll to show new content
       document.getElementById('load-more-wrap').scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (err) {
       showToast('追加失败: ' + err.message);
@@ -649,14 +850,12 @@ function initLoadMore() {
 }
 
 // ===================== DICTIONARY PANEL (Left Panel) =====================
-
 let _dictPanelReady = false;
 
 function initDictPanel() {
   const container = document.getElementById('segments-container');
 
   if (!_dictPanelReady) {
-    // One-time setup: handle word clicks, mode checked dynamically
     const wordHandler = async (e) => {
       const clickMode = settingsData.wordClickMode || 'double';
       if (e.type === 'dblclick' && clickMode !== 'double') return;
@@ -668,10 +867,8 @@ function initDictPanel() {
       const word = wordEl.dataset.word;
       if (!word) return;
 
-      // Capture context: which sentence/segment this word appears in
       const card = wordEl.closest('.segment-card');
       const segmentId = card ? parseInt(card.dataset.segmentId) : 0;
-      // Get the specific sentence text from the enclosing sentence-line or full paragraph
       const sLine = wordEl.closest('.sentence-line');
       let sentence = '';
       if (sLine) {
@@ -693,7 +890,6 @@ function initDictPanel() {
     container.addEventListener('click', wordHandler);
     container.addEventListener('dblclick', wordHandler);
 
-    // Panel action buttons (one-time bind)
     document.getElementById('left-panel').addEventListener('click', async (e) => {
       if (e.target.id === 'panel-add-vocab-btn') {
         await addWordToVocabFromPanel();
@@ -733,14 +929,12 @@ async function showWordInPanel(word) {
     <button id="panel-add-vocab-btn" class="panel-add-vocab-btn">+ 加入生词本</button>
   `;
 
-  // Check if already in vocab — if so, show saved explanation
   const existing = vocabData.words.find(w => w.word.toLowerCase() === word.toLowerCase());
   const addBtn = document.getElementById('panel-add-vocab-btn');
 
   if (existing) {
     addBtn.textContent = '已在生词本中 ✓';
     addBtn.style.background = '#666';
-    // Pre-fill saved explanation if available
     if (existing.llm_explanation) {
       const explainResult = document.getElementById('llm-explain-result');
       explainResult.classList.remove('hidden');
@@ -748,17 +942,14 @@ async function showWordInPanel(word) {
     }
   }
 
-  // Fetch local dictionary (instant)
   try {
     const resp = await fetch(`/api/dictionary?word=${encodeURIComponent(word)}`);
     const data = await resp.json();
 
-    // Phonetic
     const phoneticEl = content.querySelector('.word-panel-phonetic');
     const localPhonetic = data.local?.phonetic || '';
     phoneticEl.textContent = localPhonetic || '';
 
-    // Local dictionary
     const localSection = document.getElementById('def-local-section');
     const localContent = document.getElementById('def-local-content');
     if (data.local) {
@@ -787,16 +978,13 @@ async function showWordInPanel(word) {
       localContent.innerHTML = '<div class="def-no-result">本地词库未收录</div>';
     }
 
-    // LLM translate section
     const translateSection = document.getElementById('def-translate-section');
     translateSection.classList.remove('hidden');
 
-    // If word is already in vocab with definition_cn, show it
     if (existing && existing.definition_cn) {
       const translateContent = document.getElementById('def-translate-content');
       translateContent.innerHTML = `<div class="def-google-translation">${escapeHtml(existing.definition_cn)}</div>`;
     } else if (data.llm_translation && data.llm_translation.translation_cn) {
-      // Auto LLM translation from server (e.g. Render without local DB)
       const translateContent = document.getElementById('def-translate-content');
       translateContent.innerHTML = `<div class="def-google-translation">${escapeHtml(data.llm_translation.translation_cn)}</div>`;
     }
@@ -865,57 +1053,65 @@ async function addWordToVocabFromPanel() {
   const content = document.getElementById('word-panel-content');
   const phonetic = content.querySelector('.word-panel-phonetic')?.textContent || '';
 
-  // Collect local definition
   let defCn = '';
   const localTranslation = content.querySelector('.def-local-translation');
   if (localTranslation) defCn = localTranslation.textContent;
 
-  // Collect LLM translate result
   const translateContent = document.getElementById('def-translate-content');
   const translateText = translateContent?.querySelector('.def-google-translation')?.textContent || '';
   if (translateText) defCn = translateText;
 
-  // Collect LLM explanation if available
   let llmExplanation = '';
   const explainResult = document.getElementById('llm-explain-result');
   if (explainResult && !explainResult.classList.contains('hidden')) {
     llmExplanation = explainResult.innerText;
   }
 
-  // Build context from current word context
   const ctx = currentWordContext ? {
     date: currentWordContext.date,
     segmentId: currentWordContext.segmentId,
     sentence: currentWordContext.sentence,
   } : null;
 
-  try {
-    const body = {
+  // Check duplicate
+  const existingIdx = vocabData.words.findIndex(w => w.word.toLowerCase() === currentDictWord.toLowerCase());
+
+  if (existingIdx >= 0) {
+    // Update existing
+    const w = vocabData.words[existingIdx];
+    if (defCn) w.definition_cn = defCn;
+    if (phonetic) w.phonetic = phonetic;
+    if (llmExplanation) w.llm_explanation = llmExplanation;
+    if (ctx) {
+      w.contexts = w.contexts || [];
+      const exists = w.contexts.some(c => c.date === ctx.date && c.segmentId === ctx.segmentId);
+      if (!exists) w.contexts.push(ctx);
+    }
+  } else {
+    const entry = {
       word: currentDictWord,
-      phonetic: phonetic,
       definition_cn: defCn || '',
       definition_en: '',
+      phonetic: phonetic,
+      llm_explanation: llmExplanation || '',
+      addedAt: new Date().toISOString().split('T')[0],
+      reviewCount: 0,
+      mastered: false,
+      contexts: [],
     };
-    if (llmExplanation) body.llm_explanation = llmExplanation;
-    if (ctx) body.context = ctx;
-
-    const resp = await fetch('/api/vocabulary', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    if (resp.ok) {
-      showToast('已加入生词本!');
-      const addBtn = document.getElementById('panel-add-vocab-btn');
-      if (addBtn) { addBtn.textContent = '已在生词本中 ✓'; addBtn.style.background = '#666'; }
-      loadVocab();
-    } else if (resp.status === 409) {
-      showToast('已在生词本中');
-    }
-  } catch (err) {
-    showToast('添加失败');
+    if (ctx) entry.contexts.push(ctx);
+    vocabData.words.push(entry);
   }
+
+  vocabData.total = vocabData.words.length;
+  vocabData.unmastered = vocabData.words.filter(w => !w.mastered).length;
+  vocabData.mastered = vocabData.total - vocabData.unmastered;
+  writeLS('er_vocabulary', { words: vocabData.words });
+
+  showToast('已加入生词本!');
+  const addBtn = document.getElementById('panel-add-vocab-btn');
+  if (addBtn) { addBtn.textContent = '已在生词本中 ✓'; addBtn.style.background = '#666'; }
+  loadVocabUI();
 }
 
 async function loadLlmExplain(word) {
@@ -949,107 +1145,93 @@ async function loadLlmExplain(word) {
 }
 
 // ===================== HISTORY PANEL (Right Panel) =====================
-async function loadHistoryPanel() {
+function loadHistoryPanel() {
   const content = document.getElementById('history-panel-content');
   const titleEl = document.getElementById('right-panel-title');
   if (titleEl) titleEl.textContent = '历史阅读';
-  try {
-    const resp = await fetch('/api/readings');
-    const data = await resp.json();
-    const dates = data.dates || [];
 
-    if (dates.length === 0) {
-      content.innerHTML = '<p class="history-empty">暂无历史记录</p>';
-      return;
+  const allReadings = readLS('er_readings', {});
+  const dates = Object.keys(allReadings).sort().reverse();
+
+  if (dates.length === 0) {
+    content.innerHTML = '<p class="history-empty">暂无历史记录</p>';
+    return;
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+  content.innerHTML = '';
+
+  dates.forEach(dateStr => {
+    const reading = allReadings[dateStr];
+    if (!reading) return;
+
+    const item = document.createElement('div');
+    item.className = 'history-item';
+    item.dataset.date = dateStr;
+    if (dateStr === currentReadingDate) item.classList.add('current');
+
+    const dateDiv = document.createElement('div');
+    dateDiv.className = 'history-item-date';
+    dateDiv.textContent = dateStr;
+    if (dateStr === today) {
+      const badge = document.createElement('span');
+      badge.className = 'history-item-badge';
+      badge.textContent = '今天';
+      dateDiv.appendChild(badge);
     }
 
-    const today = new Date().toISOString().split('T')[0];
-    content.innerHTML = '';
+    const topicDiv = document.createElement('div');
+    topicDiv.className = 'history-item-topic';
+    let displayTopic = reading.topic || '(无主题)';
+    if (displayTopic === '__HOT_TOPICS__') displayTopic = '近期热点';
+    topicDiv.textContent = displayTopic;
 
-    dates.forEach(dateStr => {
-      const item = document.createElement('div');
-      item.className = 'history-item';
-      item.dataset.date = dateStr;
-      if (dateStr === currentReadingDate) item.classList.add('current');
-
-      const dateDiv = document.createElement('div');
-      dateDiv.className = 'history-item-date';
-      dateDiv.textContent = dateStr;
-      if (dateStr === today) {
-        const badge = document.createElement('span');
-        badge.className = 'history-item-badge';
-        badge.textContent = '今天';
-        dateDiv.appendChild(badge);
+    const segCountDiv = document.createElement('div');
+    segCountDiv.className = 'history-item-topic';
+    segCountDiv.style.fontSize = '0.7rem';
+    segCountDiv.style.color = '#999';
+    if (reading.topics && reading.topics.length > 0) {
+      const topics = reading.topics;
+      const total = topics.reduce((s, t) => s + (t.segmentCount || 0), 0) || (reading.segments ? reading.segments.length : 0);
+      if (topics.length === 1) {
+        segCountDiv.textContent = `${total} 段`;
+      } else {
+        segCountDiv.textContent = topics.map(t => `${t.topic}: ${t.segmentCount}段`).join(' | ');
       }
+    } else if (reading.segments) {
+      segCountDiv.textContent = `${reading.segments.length} 段`;
+    }
 
-      const topicDiv = document.createElement('div');
-      topicDiv.className = 'history-item-topic';
-      topicDiv.textContent = '加载中...';
+    item.appendChild(dateDiv);
+    item.appendChild(topicDiv);
+    item.appendChild(segCountDiv);
 
-      const segCountDiv = document.createElement('div');
-      segCountDiv.className = 'history-item-topic';
-      segCountDiv.style.fontSize = '0.7rem';
-      segCountDiv.style.color = '#999';
-      segCountDiv.textContent = '';
-
-      item.appendChild(dateDiv);
-      item.appendChild(topicDiv);
-      item.appendChild(segCountDiv);
-
-      item.addEventListener('click', () => {
-        currentReadingDate = dateStr;
-        loadReading(dateStr);
-        content.querySelectorAll('.history-item').forEach(el => el.classList.remove('current'));
-        item.classList.add('current');
-        // Switch right panel title to history mode
-        const titleEl = document.getElementById('right-panel-title');
-        if (titleEl) titleEl.textContent = '历史阅读';
-        if (currentTab !== 'reading') {
-          document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-          document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-          document.querySelector('.tab[data-tab="reading"]').classList.add('active');
-          document.getElementById('tab-reading').classList.add('active');
-          currentTab = 'reading';
-        }
-      });
-
-      content.appendChild(item);
-
-      // Load topic and segment count asynchronously
-      fetch(`/api/readings/${dateStr}`).then(r => r.json()).then(d => {
-        let displayTopic = d.topic || '(无主题)';
-        if (displayTopic === '__HOT_TOPICS__') displayTopic = '近期热点';
-        topicDiv.textContent = displayTopic;
-        // Show topics breakdown if available
-        if (d.topics && d.topics.length > 0) {
-          const topics = d.topics;
-          const total = topics.reduce((s, t) => s + (t.segmentCount || 0), 0);
-          if (topics.length === 1) {
-            segCountDiv.textContent = `${total} 段`;
-          } else {
-            segCountDiv.textContent = topics.map(t => `${t.topic}: ${t.segmentCount}段`).join(' | ');
-          }
-        } else if (d.segments) {
-          segCountDiv.textContent = `${d.segments.length} 段`;
-        }
-      }).catch(() => {
-        topicDiv.textContent = '(加载失败)';
-      });
+    item.addEventListener('click', () => {
+      currentReadingDate = dateStr;
+      loadReading(dateStr);
+      content.querySelectorAll('.history-item').forEach(el => el.classList.remove('current'));
+      item.classList.add('current');
+      const titleEl = document.getElementById('right-panel-title');
+      if (titleEl) titleEl.textContent = '历史阅读';
+      if (currentTab !== 'reading') {
+        document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.querySelector('.tab[data-tab="reading"]').classList.add('active');
+        document.getElementById('tab-reading').classList.add('active');
+        currentTab = 'reading';
+      }
     });
-  } catch (err) {
-    content.innerHTML = '<p style="color:#c0392b;text-align:center;">加载失败</p>';
-  }
+
+    content.appendChild(item);
+  });
 }
 
 // ===================== VOCABULARY =====================
-async function loadVocab() {
-  try {
-    const resp = await fetch('/api/vocabulary');
-    vocabData = await resp.json();
-    renderVocab();
-  } catch (err) {
-    console.error('Failed to load vocabulary', err);
-  }
+function loadVocabUI() {
+  vocabData.total = vocabData.words.length;
+  vocabData.unmastered = vocabData.words.filter(w => !w.mastered).length;
+  vocabData.mastered = vocabData.total - vocabData.unmastered;
+  renderVocab();
 }
 
 function initVocabulary() {
@@ -1063,15 +1245,6 @@ function initVocabulary() {
       renderVocab();
     });
   });
-
-  // Add export buttons
-  const exportDiv = document.createElement('div');
-  exportDiv.className = 'vocab-export';
-  exportDiv.innerHTML = `
-    <button id="vocab-export-csv" class="btn-small" style="background:#666;">导出 CSV</button>
-    <button id="vocab-export-anki" class="btn-small" style="background:#666;">导出 Anki 格式</button>
-  `;
-  document.getElementById('tab-vocabulary').appendChild(exportDiv);
 
   document.getElementById('vocab-export-csv').addEventListener('click', exportCSV);
   document.getElementById('vocab-export-anki').addEventListener('click', exportAnki);
@@ -1111,7 +1284,6 @@ function renderVocab() {
   words.forEach(w => {
     const row = document.createElement('div');
     row.className = 'vocab-row' + (w.mastered ? ' mastered' : '');
-    // Show brief explanation indicator
     const hasExplain = w.llm_explanation ? ' 有AI解释' : '';
     row.innerHTML = `
       <span class="v-word">${escapeHtml(w.word)}</span>
@@ -1126,15 +1298,12 @@ function renderVocab() {
       </span>
     `;
 
-    // Click on vocab word → left: definition, right: source segments
     row.addEventListener('click', async (e) => {
       if (e.target.closest('.v-action-btn')) return;
       currentWordContext = null;
       await showWordInPanelFromVocab(w);
       toggleLeftPanel(true);
-      // Load source segments into right panel
       await loadVocabSourcesIntoRightPanel(w);
-      // Switch right panel title
       const titleEl = document.getElementById('right-panel-title');
       if (titleEl) titleEl.textContent = '出处片段';
       toggleRightPanel(true);
@@ -1158,15 +1327,21 @@ function renderVocab() {
       const word = btn.dataset.word;
       if (action === 'toggle') {
         const w = vocabData.words.find(v => v.word === word);
-        await fetch(`/api/vocabulary/${encodeURIComponent(word)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mastered: !(w?.mastered) }),
-        });
-        loadVocab();
+        if (w) {
+          w.mastered = !w.mastered;
+          vocabData.total = vocabData.words.length;
+          vocabData.unmastered = vocabData.words.filter(x => !x.mastered).length;
+          vocabData.mastered = vocabData.total - vocabData.unmastered;
+          writeLS('er_vocabulary', { words: vocabData.words });
+          renderVocab();
+        }
       } else if (action === 'delete') {
-        await fetch(`/api/vocabulary/${encodeURIComponent(word)}`, { method: 'DELETE' });
-        loadVocab();
+        vocabData.words = vocabData.words.filter(v => v.word !== word);
+        vocabData.total = vocabData.words.length;
+        vocabData.unmastered = vocabData.words.filter(x => !x.mastered).length;
+        vocabData.mastered = vocabData.total - vocabData.unmastered;
+        writeLS('er_vocabulary', { words: vocabData.words });
+        renderVocab();
       }
     });
   });
@@ -1201,7 +1376,6 @@ async function showWordInPanelFromVocab(vocabEntry) {
     <button id="panel-add-vocab-btn" class="panel-add-vocab-btn" disabled style="background:#666;">已在生词本中 ✓</button>
   `;
 
-  // Fetch local dictionary
   try {
     const resp = await fetch(`/api/dictionary?word=${encodeURIComponent(word)}`);
     const data = await resp.json();
@@ -1248,7 +1422,6 @@ async function loadVocabSourcesIntoRightPanel(vocabEntry) {
   }
 
   content.innerHTML = '';
-  // Show most recent first
   const sorted = [...contexts].reverse();
 
   sorted.forEach(ctx => {
@@ -1266,7 +1439,6 @@ async function loadVocabSourcesIntoRightPanel(vocabEntry) {
     item.appendChild(dateDiv);
     item.appendChild(enDiv);
 
-    // Click to navigate to that reading
     item.addEventListener('click', () => {
       currentReadingDate = ctx.date;
       document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
@@ -1275,7 +1447,6 @@ async function loadVocabSourcesIntoRightPanel(vocabEntry) {
       document.getElementById('tab-reading').classList.add('active');
       currentTab = 'reading';
       loadReading(ctx.date);
-      // Switch right panel back to history
       if (titleEl) titleEl.textContent = '历史阅读';
       loadHistoryPanel();
     });
@@ -1305,12 +1476,9 @@ async function toggleWordContext(word, rowEl) {
   ctxDiv.id = `ctx-${wordLower}`;
   rowEl.insertAdjacentElement('afterend', ctxDiv);
 
-  try {
-    const resp = await fetch(`/api/vocabulary/${encodeURIComponent(word)}/contexts`);
-    const data = await resp.json();
-    renderContexts(ctxDiv, { word, contexts: data.contexts || [] });
-  } catch (err) {
-    ctxDiv.innerHTML = '<p style="color:#999;">加载失败</p>';
+  const w = vocabData.words.find(v => v.word.toLowerCase() === wordLower);
+  if (w) {
+    renderContexts(ctxDiv, w);
   }
 }
 
@@ -1378,34 +1546,21 @@ function downloadFile(filename, content, mime) {
 }
 
 // ===================== SETTINGS =====================
-async function loadSettings() {
-  try {
-    const resp = await fetch('/api/settings');
-    settingsData = await resp.json();
-    populateSettingsForm();
-  } catch (err) {
-    console.error('Failed to load settings', err);
-  }
+function syncReadingTabSliders() {
+  const wps = settingsData.wordsPerSegment || 50;
+  const sc = settingsData.segmentCount || 10;
+  document.getElementById('words-slider').value = wps;
+  document.getElementById('words-input').value = wps;
+  document.getElementById('words-val').textContent = wps;
+  document.getElementById('count-slider').value = sc;
+  document.getElementById('count-input').value = sc;
+  document.getElementById('count-val').textContent = sc;
 }
 
 function populateSettingsForm() {
   const keyInput = document.getElementById('setting-api-key');
-  if (settingsData.api_key_source === 'env') {
-    keyInput.value = '';
-    keyInput.placeholder = settingsData.api_key_masked || 'sk-... (来自 .env)';
-    keyInput.disabled = true;
-    keyInput.title = 'API Key 由 .env 文件中的 DEEPSEEK_API_KEY 管理';
-  } else if (settingsData.api_key) {
-    keyInput.value = settingsData.api_key;
-    keyInput.placeholder = settingsData.api_key_masked || 'sk-...';
-    keyInput.disabled = false;
-    keyInput.title = '';
-  } else {
-    keyInput.value = '';
-    keyInput.placeholder = 'sk-...';
-    keyInput.disabled = false;
-    keyInput.title = '';
-  }
+  keyInput.value = settingsData.api_key || '';
+  keyInput.disabled = false;
 
   document.getElementById('setting-api-url').value = settingsData.api_base_url || '';
 
@@ -1430,23 +1585,21 @@ function populateSettingsForm() {
   document.getElementById('setting-vocab-count-input').value = settingsData.vocabIntegrationCount || 8;
   document.getElementById('setting-vocab-count-val').textContent = settingsData.vocabIntegrationCount || 8;
 
-  // Click mode
   const clickMode = settingsData.wordClickMode || 'double';
   const clickRadio = document.querySelector(`input[name="clickMode"][value="${clickMode}"]`);
   if (clickRadio) clickRadio.checked = true;
 
   renderSavedTopics();
   updateApiKeyStatus();
+
+  syncReadingTabSliders();
 }
 
 function updateApiKeyStatus() {
   const statusEl = document.getElementById('api-key-status');
   const keyInput = document.getElementById('setting-api-key');
-  if (settingsData.api_key_source === 'env') {
-    statusEl.textContent = 'API Key 由 .env 文件管理 (只读)';
-    statusEl.style.color = '#4a7c59';
-  } else if (settingsData.api_key) {
-    statusEl.textContent = 'API Key 已配置 (保存在本地)';
+  if (settingsData.api_key) {
+    statusEl.textContent = 'API Key 已配置 (保存在浏览器)';
     statusEl.style.color = '#4a7c59';
     if (!keyInput.value) {
       keyInput.placeholder = settingsData.api_key_masked || 'sk-... (已保存)';
@@ -1455,7 +1608,7 @@ function updateApiKeyStatus() {
     statusEl.textContent = '点击保存后生效';
     statusEl.style.color = '#e67e22';
   } else {
-    statusEl.textContent = '请输入 API Key 后保存';
+    statusEl.textContent = '请输入 API Key 后保存 (或设置 DEEPSEEK_API_KEY 环境变量)';
     statusEl.style.color = '#e67e22';
   }
 }
@@ -1475,17 +1628,13 @@ function renderSavedTopics() {
   });
 }
 
-async function addToSavedTopics(topic) {
+function addToSavedTopics(topic) {
   if (!topic || topic === '__HOT_TOPICS__') return;
   if (!settingsData.savedTopics) settingsData.savedTopics = [];
   if (!settingsData.savedTopics.includes(topic)) {
     settingsData.savedTopics.unshift(topic);
     if (settingsData.savedTopics.length > 20) settingsData.savedTopics.pop();
-    await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ savedTopics: settingsData.savedTopics }),
-    });
+    writeLS('er_settings', settingsData);
   }
 }
 
@@ -1494,7 +1643,7 @@ function initSettings() {
   document.getElementById('setting-api-key').addEventListener('input', updateApiKeyStatus);
 }
 
-async function saveSettings() {
+function saveSettings() {
   const status = document.getElementById('settings-status');
 
   const defaultTopic = document.getElementById('setting-default-topic').value.trim();
@@ -1502,45 +1651,27 @@ async function saveSettings() {
   const apiKeyInput = document.getElementById('setting-api-key').value.trim();
   const clickMode = document.querySelector('input[name="clickMode"]:checked')?.value || 'double';
 
-  const newSettings = {
-    api_base_url: document.getElementById('setting-api-url').value.trim(),
-    wordsPerSegment: parseInt(document.getElementById('setting-words-input').value),
-    segmentCount: parseInt(document.getElementById('setting-count-input').value),
-    difficulty: difficulty,
-    defaultTopic: defaultTopic || '__HOT_TOPICS__',
-    vocabIntegration: document.getElementById('setting-vocab-integration').checked,
-    vocabIntegrationCount: parseInt(document.getElementById('setting-vocab-count-input').value),
-    savedTopics: settingsData.savedTopics || [],
-    wordClickMode: clickMode,
-  };
+  settingsData.api_base_url = document.getElementById('setting-api-url').value.trim();
+  settingsData.wordsPerSegment = parseInt(document.getElementById('setting-words-input').value);
+  settingsData.segmentCount = parseInt(document.getElementById('setting-count-input').value);
+  settingsData.difficulty = difficulty;
+  settingsData.defaultTopic = defaultTopic || '__HOT_TOPICS__';
+  settingsData.vocabIntegration = document.getElementById('setting-vocab-integration').checked;
+  settingsData.vocabIntegrationCount = parseInt(document.getElementById('setting-vocab-count-input').value);
+  settingsData.wordClickMode = clickMode;
 
-  if (settingsData.api_key_source !== 'env' && apiKeyInput && apiKeyInput !== settingsData.api_key) {
-    newSettings.api_key = apiKeyInput;
+  if (apiKeyInput) {
+    settingsData.api_key = apiKeyInput;
   }
 
-  try {
-    const resp = await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newSettings),
-    });
-    if (!resp.ok) throw new Error('保存失败');
-    settingsData = await resp.json();
+  // Save to localStorage
+  writeLS('er_settings', settingsData);
 
-    // Sync sliders on reading tab
-    document.getElementById('words-slider').value = settingsData.wordsPerSegment;
-    document.getElementById('words-input').value = settingsData.wordsPerSegment;
-    document.getElementById('words-val').textContent = settingsData.wordsPerSegment;
-    document.getElementById('count-slider').value = settingsData.segmentCount;
-    document.getElementById('count-input').value = settingsData.segmentCount;
-    document.getElementById('count-val').textContent = settingsData.segmentCount;
+  // Sync reading tab sliders
+  syncReadingTabSliders();
+  initDictPanel();
 
-    initDictPanel();
-    status.textContent = '设置已保存!';
-    status.className = 'status success';
-    showToast('设置已保存!');
-  } catch (err) {
-    status.textContent = '保存失败: ' + err.message;
-    status.className = 'status error';
-  }
+  status.textContent = '设置已保存!';
+  status.className = 'status success';
+  showToast('设置已保存!');
 }
