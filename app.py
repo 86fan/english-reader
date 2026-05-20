@@ -2,6 +2,7 @@
 
 import json
 import os
+import random
 import sys
 import traceback
 from datetime import datetime, date
@@ -17,10 +18,16 @@ load_dotenv()
 
 # --- Paths (support PyInstaller frozen exe) ---
 if getattr(sys, "frozen", False):
-    # Running as exe: data goes next to exe; static files come from temp extraction
+    # Running as exe: data goes next to exe; static files in _internal/
     EXE_DIR = Path(sys.executable).parent
     DATA_DIR = EXE_DIR / "data"
-    STATIC_DIR = Path(sys._MEIPASS) / "static"
+    # In onedir mode, _MEIPASS is _internal/ dir next to exe.
+    # Fall back to EXE_DIR/_internal if _MEIPASS is absent.
+    _meipass = getattr(sys, "_MEIPASS", None)
+    if _meipass:
+        STATIC_DIR = Path(_meipass) / "static"
+    else:
+        STATIC_DIR = EXE_DIR / "_internal" / "static"
 else:
     EXE_DIR = Path(__file__).parent
     DATA_DIR = EXE_DIR / "data"
@@ -111,7 +118,7 @@ def generate():
 
         count = body.get("count") or settings.get("segmentCount", 10)
         words_per_seg = body.get("wordsPerSegment") or settings.get("wordsPerSegment", 50)
-        difficulty = body.get("difficulty") or settings.get("difficulty", "intermediate")
+        difficulty = body.get("difficulty") or settings.get("difficulty", "cet6")
 
         # Collect vocabulary words
         vocab_words = []
@@ -121,6 +128,7 @@ def generate():
             all_words = vocab_file.get("words", [])
             unmastered = [w for w in all_words if not w.get("mastered", False)]
             unmastered.sort(key=lambda w: w.get("reviewCount", 0))
+            random.shuffle(unmastered)
             vocab_words = [w["word"] for w in unmastered[:vocab_count]]
 
         generator = ReadingGenerator(api_key=api_key, api_base_url=api_base)
@@ -132,6 +140,20 @@ def generate():
             vocab_words=vocab_words,
         )
 
+        actual_topic = getattr(generator, "last_topic", None)
+        if not actual_topic or actual_topic == "__HOT_TOPICS__":
+            if topic == "__HOT_TOPICS__":
+                if segments:
+                    first_en = segments[0]["english"][:80]
+                    actual_topic = f"近期热点: {first_en}..."
+                else:
+                    actual_topic = "近期热点"
+            else:
+                actual_topic = topic
+        elif topic and topic != "__HOT_TOPICS__":
+            # User provided a topic — prefer their original language (e.g. Chinese)
+            actual_topic = topic
+
         today = _get_today_str()
         reading_file = READINGS_DIR / f"{today}.json"
         existing = _load_json(reading_file)
@@ -142,14 +164,26 @@ def generate():
                 {**seg, "id": start_id + i} for i, seg in enumerate(segments)
             )
             existing["generatedAt"] = datetime.now().isoformat()
+            if actual_topic and actual_topic != "__HOT_TOPICS__":
+                existing["topic"] = actual_topic
+            # Track each generation batch as a topic entry
+            existing.setdefault("topics", [])
+            existing["topics"].append({
+                "topic": actual_topic or topic,
+                "segmentCount": len(segments),
+            })
             reading = existing
         else:
             reading = {
                 "date": today,
-                "topic": topic,
+                "topic": actual_topic,
                 "difficulty": difficulty,
                 "generatedAt": datetime.now().isoformat(),
                 "segments": [{**seg, "id": i} for i, seg in enumerate(segments)],
+                "topics": [{
+                    "topic": actual_topic or topic,
+                    "segmentCount": len(segments),
+                }],
             }
 
         _save_json(reading_file, reading)
@@ -183,7 +217,7 @@ def generate():
         return jsonify(
             {
                 "date": today,
-                "topic": topic,
+                "topic": actual_topic,
                 "segments": reading["segments"],
                 "saved": True,
                 "missingVocab": missing,
@@ -201,15 +235,51 @@ def dictionary():
         if not word:
             return jsonify({"error": "Missing word parameter"}), 400
 
+        d = Dictionary()
+        result = d.lookup(word)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": f"Dictionary lookup failed: {str(e)}"}), 500
+
+
+@app.route("/api/dictionary/translate", methods=["POST"])
+def dictionary_translate():
+    """Quick Chinese translation via LLM (uses existing API key, no extra config)."""
+    try:
+        body = request.get_json(silent=True) or {}
+        word = body.get("word", "").strip()
+        if not word:
+            return jsonify({"error": "Missing word parameter"}), 400
+
+        api_key = _get_api_key()
+        api_base = _get_settings().get("api_base_url", "") or DEFAULT_API_BASE
+        if not api_key:
+            return jsonify({"error": "请先配置 API Key"}), 400
+
+        d = Dictionary(llm_api_key=api_key, llm_base_url=api_base)
+        result = d.translate_llm(word)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": f"Translation failed: {str(e)}"}), 500
+
+
+@app.route("/api/dictionary/llm", methods=["POST"])
+def dictionary_llm():
+    try:
+        body = request.get_json(silent=True) or {}
+        word = body.get("word", "").strip()
+        if not word:
+            return jsonify({"error": "Missing word parameter"}), 400
+
         settings = _get_settings()
         api_key = _get_api_key()
         api_base = settings.get("api_base_url", "") or DEFAULT_API_BASE
 
         d = Dictionary(llm_api_key=api_key, llm_base_url=api_base)
-        result = d.lookup(word)
+        result = d.explain_llm(word)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": f"Dictionary lookup failed: {str(e)}"}), 500
+        return jsonify({"error": f"LLM explain failed: {str(e)}"}), 500
 
 
 # --- Vocabulary CRUD ---
@@ -233,21 +303,39 @@ def add_vocabulary():
     vocab = _get_vocabulary()
     words = vocab.get("words", [])
 
-    # Check duplicate
+    # Check duplicate — update if already exists
     for w in words:
         if w["word"].lower() == word.lower():
-            return jsonify({"error": "Word already exists", "word": w}), 409
+            if body.get("definition_cn"):
+                w["definition_cn"] = body["definition_cn"]
+            if body.get("definition_en"):
+                w["definition_en"] = body["definition_en"]
+            if body.get("phonetic"):
+                w["phonetic"] = body["phonetic"]
+            if body.get("llm_explanation"):
+                w["llm_explanation"] = body["llm_explanation"]
+            if body.get("context"):
+                w.setdefault("contexts", [])
+                existing = {(c.get("date"), c.get("segmentId")) for c in w["contexts"]}
+                ctx = body["context"]
+                if (ctx.get("date"), ctx.get("segmentId")) not in existing:
+                    w["contexts"].append(ctx)
+            _save_vocabulary(vocab)
+            return jsonify(w), 200
 
     entry = {
         "word": word,
         "definition_cn": body.get("definition_cn", ""),
         "definition_en": body.get("definition_en", ""),
         "phonetic": body.get("phonetic", ""),
+        "llm_explanation": body.get("llm_explanation", ""),
         "addedAt": _get_today_str(),
         "reviewCount": 0,
         "mastered": False,
         "contexts": [],
     }
+    if body.get("context"):
+        entry["contexts"].append(body["context"])
     words.append(entry)
     vocab["words"] = words
     _save_vocabulary(vocab)
@@ -280,6 +368,8 @@ def update_vocabulary(word):
                 w["definition_en"] = body["definition_en"]
             if "phonetic" in body:
                 w["phonetic"] = body["phonetic"]
+            if "llm_explanation" in body:
+                w["llm_explanation"] = body["llm_explanation"]
             _save_vocabulary(vocab)
             return jsonify(w)
     return jsonify({"error": "Word not found"}), 404
@@ -340,6 +430,7 @@ def update_settings():
     allowed_keys = [
         "api_key", "api_base_url", "segmentCount", "wordsPerSegment", "difficulty",
         "savedTopics", "defaultTopic", "vocabIntegration", "vocabIntegrationCount",
+        "wordClickMode",
     ]
     for key in allowed_keys:
         if key in body:
@@ -403,8 +494,21 @@ def server_error(e):
 @app.errorhandler(Exception)
 def unhandled_exception(e):
     """Catch-all for non-HTTP exceptions: ensure nothing ever returns HTML."""
-    traceback.print_exc()
-    return jsonify({"error": f"Server error: {str(e)}"}), 500
+    # Avoid traceback.print_exc() which may fail with non-ASCII in PyInstaller
+    try:
+        traceback.print_exc()
+    except Exception:
+        pass
+    msg = str(e).encode("utf-8", errors="replace").decode("utf-8")
+    return jsonify({"error": f"Server error: {msg}"}), 500
+
+
+# --- Shutdown ---
+@app.route("/api/shutdown", methods=["POST"])
+def shutdown():
+    """Shut down the application server."""
+    import os as _os
+    _os._exit(0)
 
 
 if __name__ == "__main__":
@@ -412,4 +516,5 @@ if __name__ == "__main__":
     print("=== EnglishReader v2.0 starting ===", flush=True)
     import webbrowser
     webbrowser.open("http://127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)

@@ -22,6 +22,9 @@ dist_fresh/
 dist_v3/
 dist_v4/
 dist_v5/
+# Data (contains sensitive API keys, large DB, personal vocabulary)
+data/
+
 # OS
 .DS_Store
 Thumbs.db

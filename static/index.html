@@ -11,160 +11,207 @@
 <div id="app">
   <!-- Header -->
   <header class="header">
-    <h1 class="logo">English Daily Reader</h1>
-    <nav class="tabs">
-      <button class="tab active" data-tab="reading">阅读</button>
-      <button class="tab" data-tab="vocabulary">生词本</button>
-      <button class="tab" data-tab="settings">设置</button>
-    </nav>
+    <div class="header-left">
+      <h1 class="logo">English Daily Reader</h1>
+      <nav class="tabs">
+        <button class="tab active" data-tab="reading">阅读</button>
+        <button class="tab" data-tab="vocabulary">生词本</button>
+        <button class="tab" data-tab="settings">设置</button>
+      </nav>
+    </div>
+    <div class="header-right">
+      <button id="toggle-left-panel" class="icon-btn" title="单词释义面板">&#x1F4D6;</button>
+      <button id="toggle-right-panel" class="icon-btn" title="历史记录面板">&#x1F4C5;</button>
+      <button id="exit-btn" class="icon-btn exit-btn" title="退出程序">&#x23FB;</button>
+    </div>
   </header>
 
-  <!-- Reading Tab -->
-  <main id="tab-reading" class="tab-content active">
-    <!-- Controls -->
-    <div class="controls-card">
-      <div class="date-row">
-        <label>日期</label>
-        <input type="date" id="reading-date" class="date-input">
-      </div>
+  <!-- Three-column layout wrapper -->
+  <div id="main-layout" class="main-layout">
 
-      <div class="topic-row">
-        <label for="topic-input">我想阅读关于...</label>
-        <div class="topic-input-wrap">
-          <input type="text" id="topic-input" class="topic-input"
-                 placeholder="近期热点 (默认)"
-                 autocomplete="off">
-          <button id="topic-history-btn" class="history-btn" title="历史主题">&#9660;</button>
-          <div id="topic-dropdown" class="topic-dropdown hidden"></div>
+    <!-- LEFT PANEL: Word Definition -->
+    <aside id="left-panel" class="side-panel left-panel">
+      <div class="panel-header">
+        <span class="panel-title">单词释义</span>
+        <button id="close-left-panel" class="panel-close">&times;</button>
+      </div>
+      <div id="word-panel-content" class="panel-body">
+        <p class="panel-hint">双击文章中的单词查看释义</p>
+      </div>
+    </aside>
+
+    <!-- CENTER: Main Content -->
+    <main id="center-content" class="center-content">
+
+      <!-- Reading Tab -->
+      <div id="tab-reading" class="tab-content active">
+        <!-- Controls -->
+        <div class="controls-card">
+          <div class="topic-row">
+            <label for="topic-input">我想阅读关于...</label>
+            <div class="topic-input-wrap">
+              <input type="text" id="topic-input" class="topic-input"
+                     placeholder="近期热点 (默认)"
+                     autocomplete="off">
+              <button id="topic-history-btn" class="history-btn" title="历史主题">&#9660;</button>
+              <div id="topic-dropdown" class="topic-dropdown hidden"></div>
+            </div>
+          </div>
+
+          <div class="sliders-row">
+            <div class="slider-group">
+              <label>每段词数: <span id="words-val">50</span> 词</label>
+              <div class="slider-wrap">
+                <input type="range" id="words-slider" min="20" max="300" value="50" step="5">
+                <input type="number" id="words-input" min="20" max="300" value="50" class="num-input">
+              </div>
+            </div>
+            <div class="slider-group">
+              <label>生成段数: <span id="count-val">10</span> 段</label>
+              <div class="slider-wrap">
+                <input type="range" id="count-slider" min="1" max="30" value="10" step="1">
+                <input type="number" id="count-input" min="1" max="30" value="10" class="num-input">
+              </div>
+            </div>
+          </div>
+
+          <button id="generate-btn" class="btn-primary">生成英语片段</button>
+          <div id="generate-status" class="status"></div>
+        </div>
+
+        <!-- Back to today bar (visible when viewing history) -->
+        <div id="back-to-today-bar" class="back-to-today-bar hidden">
+          <span id="back-to-today-label"></span>
+          <button id="back-to-today-btn" class="back-to-today-btn">回到今日阅读</button>
+        </div>
+
+        <!-- Segments -->
+        <div id="segments-container"></div>
+        <div id="load-more-wrap" class="load-more-wrap hidden">
+          <button id="load-more-btn" class="btn-secondary">继续生成更多...</button>
         </div>
       </div>
 
-      <div class="sliders-row">
-        <div class="slider-group">
-          <label>每段词数: <span id="words-val">50</span> 词</label>
-          <div class="slider-wrap">
-            <input type="range" id="words-slider" min="20" max="120" value="50" step="5">
-            <input type="number" id="words-input" min="20" max="120" value="50" class="num-input">
+      <!-- Vocabulary Tab -->
+      <div id="tab-vocabulary" class="tab-content">
+        <div class="vocab-header">
+          <div class="vocab-stats">
+            <span id="vocab-total">共 0 词</span>
+            <span id="vocab-unmastered">未掌握 0 词</span>
+          </div>
+          <div class="vocab-filters">
+            <button class="filter-btn active" data-filter="all">全部</button>
+            <button class="filter-btn" data-filter="unmastered">未掌握</button>
+            <button class="filter-btn" data-filter="mastered">已掌握</button>
+          </div>
+          <input type="text" id="vocab-search" class="search-input" placeholder="搜索单词...">
+        </div>
+        <div id="vocab-list" class="vocab-list"></div>
+      </div>
+
+      <!-- Settings Tab -->
+      <div id="tab-settings" class="tab-content">
+        <div class="settings-card">
+          <h3>API 配置</h3>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="setting-api-key" class="form-input"
+                   placeholder="sk-...">
+            <span class="hint" id="api-key-status"></span>
+          </div>
+          <div class="form-group">
+            <label>API URL (OpenAI 兼容接口)</label>
+            <input type="text" id="setting-api-url" class="form-input"
+                   placeholder="https://api.deepseek.com/v1">
           </div>
         </div>
-        <div class="slider-group">
-          <label>生成段数: <span id="count-val">10</span> 段</label>
-          <div class="slider-wrap">
-            <input type="range" id="count-slider" min="1" max="30" value="10" step="1">
-            <input type="number" id="count-input" min="1" max="30" value="10" class="num-input">
+
+        <div class="settings-card">
+          <h3>生成默认值</h3>
+          <div class="slider-group">
+            <label>每段词数: <span id="setting-words-val">50</span> 词</label>
+            <div class="slider-wrap">
+              <input type="range" id="setting-words-slider" min="20" max="300" value="50" step="5">
+              <input type="number" id="setting-words-input" min="20" max="300" value="50" class="num-input">
+            </div>
+          </div>
+          <div class="slider-group">
+            <label>每次段数: <span id="setting-count-val">10</span> 段</label>
+            <div class="slider-wrap">
+              <input type="range" id="setting-count-slider" min="1" max="30" value="10" step="1">
+              <input type="number" id="setting-count-input" min="1" max="30" value="10" class="num-input">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>默认难度</label>
+            <div class="radio-group">
+              <label><input type="radio" name="difficulty" value="highschool"> 高中</label>
+              <label><input type="radio" name="difficulty" value="cet4"> 四级</label>
+              <label><input type="radio" name="difficulty" value="cet6" checked> 六级</label>
+              <label><input type="radio" name="difficulty" value="postgrad"> 考研</label>
+              <label><input type="radio" name="difficulty" value="ielts"> 雅思</label>
+            </div>
           </div>
         </div>
-      </div>
 
-      <button id="generate-btn" class="btn-primary">生成英语片段</button>
-      <div id="generate-status" class="status"></div>
-    </div>
-
-    <!-- Segments -->
-    <div id="segments-container"></div>
-    <div id="load-more-wrap" class="load-more-wrap hidden">
-      <button id="load-more-btn" class="btn-secondary">继续生成更多...</button>
-    </div>
-  </main>
-
-  <!-- Vocabulary Tab -->
-  <main id="tab-vocabulary" class="tab-content">
-    <div class="vocab-header">
-      <div class="vocab-stats">
-        <span id="vocab-total">共 0 词</span>
-        <span id="vocab-unmastered">未掌握 0 词</span>
-      </div>
-      <div class="vocab-filters">
-        <button class="filter-btn active" data-filter="all">全部</button>
-        <button class="filter-btn" data-filter="unmastered">未掌握</button>
-        <button class="filter-btn" data-filter="mastered">已掌握</button>
-      </div>
-      <input type="text" id="vocab-search" class="search-input" placeholder="搜索单词...">
-    </div>
-    <div id="vocab-list" class="vocab-list"></div>
-  </main>
-
-  <!-- Settings Tab -->
-  <main id="tab-settings" class="tab-content">
-    <div class="settings-card">
-      <h3>API 配置</h3>
-      <div class="form-group">
-        <label>API Key</label>
-        <input type="password" id="setting-api-key" class="form-input"
-               placeholder="sk-...">
-        <span class="hint" id="api-key-status"></span>
-      </div>
-      <div class="form-group">
-        <label>API URL (OpenAI 兼容接口)</label>
-        <input type="text" id="setting-api-url" class="form-input"
-               placeholder="https://api.deepseek.com/v1">
-      </div>
-    </div>
-
-    <div class="settings-card">
-      <h3>生成默认值</h3>
-      <div class="slider-group">
-        <label>每段词数: <span id="setting-words-val">50</span> 词</label>
-        <div class="slider-wrap">
-          <input type="range" id="setting-words-slider" min="20" max="120" value="50" step="5">
-          <input type="number" id="setting-words-input" min="20" max="120" value="50" class="num-input">
+        <div class="settings-card">
+          <h3>默认主题 (留空则使用"近期热点")</h3>
+          <input type="text" id="setting-default-topic" class="form-input"
+                 placeholder="输入默认感兴趣的主题...">
+          <div class="topic-chips" id="saved-topics-chips"></div>
         </div>
-      </div>
-      <div class="slider-group">
-        <label>每次段数: <span id="setting-count-val">10</span> 段</label>
-        <div class="slider-wrap">
-          <input type="range" id="setting-count-slider" min="1" max="30" value="10" step="1">
-          <input type="number" id="setting-count-input" min="1" max="30" value="10" class="num-input">
+
+        <div class="settings-card">
+          <h3>生词融入</h3>
+          <label class="checkbox-label">
+            <input type="checkbox" id="setting-vocab-integration" checked>
+            生成时融入生词本词汇
+          </label>
+          <div class="slider-group" id="vocab-count-group">
+            <label>每次融入数量: <span id="setting-vocab-count-val">8</span> 个</label>
+            <div class="slider-wrap">
+              <input type="range" id="setting-vocab-count-slider" min="1" max="10" value="8" step="1">
+              <input type="number" id="setting-vocab-count-input" min="1" max="10" value="8" class="num-input">
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="form-group">
-        <label>默认难度</label>
-        <div class="radio-group">
-          <label><input type="radio" name="difficulty" value="beginner"> 初级</label>
-          <label><input type="radio" name="difficulty" value="intermediate" checked> 中级</label>
-          <label><input type="radio" name="difficulty" value="advanced"> 高级</label>
+
+        <div class="settings-card">
+          <h3>网络翻译</h3>
+          <p class="hint" style="margin-top:4px;">点击单词后使用 AI 翻译按钮，直接调用已配置的 API（DeepSeek），无需额外设置。单次翻译仅消耗极少 token。</p>
         </div>
-      </div>
-    </div>
 
-    <div class="settings-card">
-      <h3>默认主题 (留空则使用"近期热点")</h3>
-      <input type="text" id="setting-default-topic" class="form-input"
-             placeholder="输入默认感兴趣的主题...">
-      <div class="topic-chips" id="saved-topics-chips"></div>
-    </div>
-
-    <div class="settings-card">
-      <h3>生词融入</h3>
-      <label class="checkbox-label">
-        <input type="checkbox" id="setting-vocab-integration" checked>
-        生成时融入生词本词汇
-      </label>
-      <div class="slider-group" id="vocab-count-group">
-        <label>每次融入数量: <span id="setting-vocab-count-val">8</span> 个</label>
-        <div class="slider-wrap">
-          <input type="range" id="setting-vocab-count-slider" min="1" max="10" value="8" step="1">
-          <input type="number" id="setting-vocab-count-input" min="1" max="10" value="8" class="num-input">
+        <div class="settings-card">
+          <h3>单词查询方式</h3>
+          <div class="radio-group">
+            <label><input type="radio" name="clickMode" value="single"> 单击单词查询释义</label>
+            <label><input type="radio" name="clickMode" value="double" checked> 双击单词查询释义</label>
+          </div>
         </div>
+
+        <button id="save-settings-btn" class="btn-primary">保存设置</button>
+        <div id="settings-status" class="status"></div>
       </div>
-    </div>
+    </main>
 
-    <button id="save-settings-btn" class="btn-primary">保存设置</button>
-    <div id="settings-status" class="status"></div>
-  </main>
+    <!-- RIGHT PANEL: History / Vocabulary Sources -->
+    <aside id="right-panel" class="side-panel right-panel">
+      <div class="panel-header">
+        <span id="right-panel-title" class="panel-title">历史阅读</span>
+        <button id="close-right-panel" class="panel-close">&times;</button>
+      </div>
+      <div id="history-panel-content" class="panel-body">
+        <p style="text-align:center;color:#999;">加载中...</p>
+      </div>
+    </aside>
 
-  <!-- Dictionary Popover -->
-  <div id="dict-popover" class="dict-popover hidden">
-    <div class="dict-content">
-      <div class="dict-word"></div>
-      <div class="dict-phonetic"></div>
-      <div class="dict-meanings"></div>
-      <button id="dict-add-vocab" class="btn-small">+ 加入生词本</button>
-    </div>
-  </div>
+  </div><!-- /main-layout -->
 
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
+
+  <!-- Overlay (mobile panel backdrop) -->
+  <div id="overlay" class="overlay hidden"></div>
 </div>
 
 <script src="/static/app.js"></script>

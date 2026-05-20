@@ -4,7 +4,7 @@
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[('C:/Users/fan20/miniconda3/envs/ml_hw/Library/bin/ffi.dll', '.'), ('C:/Users/fan20/miniconda3/envs/ml_hw/Library/bin/liblzma.dll', '.'), ('C:/Users/fan20/miniconda3/envs/ml_hw/Library/bin/libbz2.dll', '.'), ('C:/Users/fan20/miniconda3/envs/ml_hw/Library/bin/libexpat.dll', '.')],
+    binaries=[('C:/Users/fan20/miniconda3/envs/ml_hw/Library/bin/ffi.dll', '.'), ('C:/Users/fan20/miniconda3/envs/ml_hw/Library/bin/liblzma.dll', '.'), ('C:/Users/fan20/miniconda3/envs/ml_hw/Library/bin/libbz2.dll', '.'), ('C:/Users/fan20/miniconda3/envs/ml_hw/Library/bin/libexpat.dll', '.'), ('C:/Users/fan20/miniconda3/envs/ml_hw/Library/bin/sqlite3.dll', '.')],
     datas=[('static', 'static')],
     hiddenimports=[],
     hookspath=[],
