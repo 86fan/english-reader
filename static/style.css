@@ -733,7 +733,8 @@ body {
   font-family: var(--font-sans);
 }
 
-.sentence-line:hover .sentence-zh-text {
+.sentence-line:hover .sentence-zh-text,
+.sentence-line.sentence-active .sentence-zh-text {
   display: block;
 }
 

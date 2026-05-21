@@ -36,7 +36,11 @@ def _get_today_str() -> str:
     return date.today().isoformat()
 
 
-def _get_api_key() -> str:
+def _get_api_key(body: dict | None = None) -> str:
+    if body:
+        key = (body.get("api_key") or "").strip()
+        if key:
+            return key
     return os.getenv("DEEPSEEK_API_KEY", "").strip()
 
 
@@ -56,7 +60,7 @@ def static_files(filename):
 def generate():
     body = request.get_json(silent=True) or {}
 
-    api_key = _get_api_key()
+    api_key = _get_api_key(body)
     api_base = body.get("api_base_url") or os.getenv("API_BASE_URL", DEFAULT_API_BASE)
 
     if not api_key:
@@ -130,7 +134,7 @@ def generate_more():
     """Generate additional segments and append to an existing reading object."""
     body = request.get_json(silent=True) or {}
 
-    api_key = _get_api_key()
+    api_key = _get_api_key(body)
     api_base = body.get("api_base_url") or os.getenv("API_BASE_URL", DEFAULT_API_BASE)
 
     if not api_key:
@@ -215,8 +219,8 @@ def dictionary_translate():
         if not word:
             return jsonify({"error": "Missing word parameter"}), 400
 
-        api_key = _get_api_key()
-        api_base = os.getenv("API_BASE_URL", DEFAULT_API_BASE)
+        api_key = _get_api_key(body)
+        api_base = body.get("api_base_url") or os.getenv("API_BASE_URL", DEFAULT_API_BASE)
         if not api_key:
             return jsonify({"error": "请先配置 API Key"}), 400
 
@@ -235,8 +239,8 @@ def dictionary_llm():
         if not word:
             return jsonify({"error": "Missing word parameter"}), 400
 
-        api_key = _get_api_key()
-        api_base = os.getenv("API_BASE_URL", DEFAULT_API_BASE)
+        api_key = _get_api_key(body)
+        api_base = body.get("api_base_url") or os.getenv("API_BASE_URL", DEFAULT_API_BASE)
         if not api_key:
             return jsonify({"error": "请先配置 API Key"}), 400
 

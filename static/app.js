@@ -29,6 +29,7 @@ let currentReadingTopic = '';
 let currentWordContext = null;
 
 let currentDictWord = '';
+let activeSentenceEl = null;
 
 // Panel state
 let leftPanelOpen = false;
@@ -315,7 +316,7 @@ function initDesktopPanelDrag(panelId) {
   });
 }
 
-// ---- Desktop panel resize (mouse) ----
+// ---- Desktop panel resize (mouse + touch) ----
 function initDesktopPanelResize(panelId) {
   const panel = document.getElementById(panelId);
   if (!panel) return;
@@ -332,25 +333,36 @@ function initDesktopPanelResize(panelId) {
   let currentDir = '';
   let startX = 0, startY = 0, startW = 0, startH = 0;
 
-  panel.addEventListener('mousedown', (e) => {
+  function getClientXY(e) {
+    if (e.touches) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.changedTouches) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function beginResize(e) {
     if (window.innerWidth <= 768) return;
     const handle = e.target.closest('.panel-resize-handle');
     if (!handle) return;
     resizing = true;
     currentDir = [...handle.classList].find(c => ['e', 's', 'se'].includes(c)) || '';
-    startX = e.clientX;
-    startY = e.clientY;
+    const pt = getClientXY(e);
+    startX = pt.x;
+    startY = pt.y;
     startW = panel.offsetWidth;
     startH = panel.offsetHeight;
     panel.style.transition = 'none';
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     e.stopPropagation();
-  });
+  }
 
-  document.addEventListener('mousemove', (e) => {
+  panel.addEventListener('mousedown', beginResize);
+  panel.addEventListener('touchstart', beginResize, { passive: false });
+
+  function doResize(e) {
     if (!resizing) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
+    const pt = getClientXY(e);
+    const dx = pt.x - startX;
+    const dy = pt.y - startY;
 
     if (currentDir.includes('e')) {
       panel.style.width = Math.max(260, startW + dx) + 'px';
@@ -358,12 +370,18 @@ function initDesktopPanelResize(panelId) {
     if (currentDir.includes('s')) {
       panel.style.height = Math.max(180, startH + dy) + 'px';
     }
-  });
+  }
 
-  document.addEventListener('mouseup', () => {
+  document.addEventListener('mousemove', doResize);
+  document.addEventListener('touchmove', doResize, { passive: false });
+
+  function endResize() {
     resizing = false;
     currentDir = '';
-  });
+  }
+
+  document.addEventListener('mouseup', endResize);
+  document.addEventListener('touchend', endResize);
 }
 
 function clampPanelsToViewport() {
@@ -533,6 +551,7 @@ function _buildGenerateBody() {
     count,
     difficulty: settingsData.difficulty || 'cet6',
     defaultTopic: settingsData.defaultTopic || '__HOT_TOPICS__',
+    api_key: settingsData.api_key || '',
     api_base_url: settingsData.api_base_url || '',
     vocabIntegration: settingsData.vocabIntegration !== false,
     vocabIntegrationCount: settingsData.vocabIntegrationCount || 8,
@@ -577,18 +596,19 @@ async function generate() {
       const existing = allReadings[reading.date];
       const startId = existing.segments.length;
       reading.segments.forEach((seg, i) => { seg.id = startId + i; });
-      existing.segments = reading.segments;
+      existing.segments = existing.segments.concat(reading.segments);
       existing.generatedAt = reading.generatedAt;
       existing.topic = reading.topic;
       existing.topics = existing.topics || [];
-      existing.topics.push({ topic: reading.topic, segmentCount: reading.segments.length - startId });
+      existing.topics.push({ topic: reading.topic, segmentCount: reading.segments.length });
     } else {
       reading.topics = [{ topic: reading.topic, segmentCount: reading.segments.length }];
       allReadings[reading.date] = reading;
     }
     writeLS('er_readings', allReadings);
 
-    renderSegments(reading.segments);
+    const merged = allReadings[reading.date];
+    renderSegments(merged.segments);
     document.getElementById('load-more-wrap').classList.remove('hidden');
     status.textContent = `已生成 ${reading.segments.length} 段 | `;
     status.className = 'status success';
@@ -613,6 +633,7 @@ async function generate() {
 
 // ===================== RENDER SEGMENTS =====================
 function renderSegments(segments) {
+  clearActiveSentence();
   const container = document.getElementById('segments-container');
   container.innerHTML = '';
 
@@ -813,6 +834,7 @@ function initLoadMore() {
       count,
       difficulty: settingsData.difficulty || 'cet6',
       defaultTopic: settingsData.defaultTopic || '__HOT_TOPICS__',
+      api_key: settingsData.api_key || '',
       api_base_url: settingsData.api_base_url || '',
       vocabIntegration: settingsData.vocabIntegration !== false,
       vocabIntegrationCount: settingsData.vocabIntegrationCount || 8,
@@ -849,6 +871,21 @@ function initLoadMore() {
   });
 }
 
+// ===================== ACTIVE SENTENCE PINNING =====================
+function setActiveSentence(sLine) {
+  if (activeSentenceEl === sLine) return;
+  if (activeSentenceEl) activeSentenceEl.classList.remove('sentence-active');
+  activeSentenceEl = sLine;
+  sLine.classList.add('sentence-active');
+}
+
+function clearActiveSentence() {
+  if (activeSentenceEl) {
+    activeSentenceEl.classList.remove('sentence-active');
+    activeSentenceEl = null;
+  }
+}
+
 // ===================== DICTIONARY PANEL (Left Panel) =====================
 let _dictPanelReady = false;
 
@@ -876,6 +913,9 @@ function initDictPanel() {
       } else {
         sentence = card ? (card.querySelector('.segment-en') || card.querySelector('.segment-en-full')).textContent : '';
       }
+
+      // Pin the active sentence so translation stays visible
+      if (sLine) setActiveSentence(sLine);
 
       currentWordContext = {
         date: currentReadingDate,
@@ -1032,7 +1072,7 @@ async function loadLlmTranslate(word) {
     const resp = await fetch('/api/dictionary/translate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ word }),
+      body: JSON.stringify({ word, api_key: settingsData.api_key || '', api_base_url: settingsData.api_base_url || '' }),
     });
     const data = await resp.json();
 
@@ -1127,7 +1167,7 @@ async function loadLlmExplain(word) {
     const resp = await fetch('/api/dictionary/llm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ word }),
+      body: JSON.stringify({ word, api_key: settingsData.api_key || '', api_base_url: settingsData.api_base_url || '' }),
     });
     const data = await resp.json();
 
