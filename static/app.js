@@ -280,23 +280,34 @@ function initDesktopPanelDrag(panelId) {
   let startX = 0, startY = 0, startLeft = 0, startTop = 0;
   let dragging = false;
 
-  header.addEventListener('mousedown', (e) => {
+  function getClientXY(e) {
+    if (e.touches) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.changedTouches) return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function beginDrag(e) {
     if (window.innerWidth <= 768) return;
     if (e.target.closest('.panel-close')) return;
     dragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
+    const pt = getClientXY(e);
+    startX = pt.x;
+    startY = pt.y;
     startLeft = panel.offsetLeft;
     startTop = panel.offsetTop;
     panel.style.transition = 'none';
     panel.style.cursor = 'grabbing';
-    e.preventDefault();
-  });
+    if (e.cancelable) e.preventDefault();
+  }
 
-  document.addEventListener('mousemove', (e) => {
+  header.addEventListener('mousedown', beginDrag);
+  header.addEventListener('touchstart', beginDrag, { passive: false });
+
+  function doDrag(e) {
     if (!dragging) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
+    const pt = getClientXY(e);
+    const dx = pt.x - startX;
+    const dy = pt.y - startY;
     let newLeft = startLeft + dx;
     let newTop = startTop + dy;
 
@@ -307,13 +318,19 @@ function initDesktopPanelDrag(panelId) {
 
     panel.style.left = newLeft + 'px';
     panel.style.top = newTop + 'px';
-  });
+  }
 
-  document.addEventListener('mouseup', () => {
+  document.addEventListener('mousemove', doDrag);
+  document.addEventListener('touchmove', doDrag, { passive: false });
+
+  function endDrag() {
     if (!dragging) return;
     dragging = false;
     panel.style.cursor = '';
-  });
+  }
+
+  document.addEventListener('mouseup', endDrag);
+  document.addEventListener('touchend', endDrag);
 }
 
 // ---- Desktop panel resize (mouse + touch) ----
@@ -1286,8 +1303,10 @@ function initVocabulary() {
     });
   });
 
-  document.getElementById('vocab-export-csv').addEventListener('click', exportCSV);
-  document.getElementById('vocab-export-anki').addEventListener('click', exportAnki);
+  const csvBtn = document.getElementById('vocab-export-csv');
+  if (csvBtn) csvBtn.addEventListener('click', exportCSV);
+  const ankiBtn = document.getElementById('vocab-export-anki');
+  if (ankiBtn) ankiBtn.addEventListener('click', exportAnki);
 }
 
 function renderVocab() {
