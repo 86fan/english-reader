@@ -13,6 +13,7 @@ from flask import Flask, request, jsonify, send_from_directory
 
 from generator import ReadingGenerator
 from dictionary import Dictionary
+from news_fetcher import fetch_trending_topic
 
 load_dotenv()
 
@@ -70,6 +71,12 @@ def generate():
         topic = (body.get("topic") or "").strip()
         if not topic:
             topic = body.get("defaultTopic", "__HOT_TOPICS__")
+
+        # Resolve HOT_TOPICS to a real trending headline
+        if topic == "__HOT_TOPICS__":
+            resolved = fetch_trending_topic()
+            if resolved:
+                topic = resolved
 
         count = body.get("count") or body.get("segmentCount", 10)
         words_per_seg = body.get("wordsPerSegment", 50)
@@ -144,6 +151,12 @@ def generate_more():
         topic = (body.get("topic") or "").strip()
         if not topic:
             topic = body.get("defaultTopic", "__HOT_TOPICS__")
+
+        # Resolve HOT_TOPICS to a real trending headline
+        if topic == "__HOT_TOPICS__":
+            resolved = fetch_trending_topic()
+            if resolved:
+                topic = resolved
 
         count = body.get("count") or body.get("segmentCount", 5)
         words_per_seg = body.get("wordsPerSegment", 50)

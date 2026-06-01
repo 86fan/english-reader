@@ -1475,3 +1475,105 @@ body {
   .segment-en { font-size: 0.95rem; }
   .controls-card { padding: 10px; }
 }
+
+/* === Speak button (TTS) === */
+.speak-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  opacity: 0.35;
+  transition: opacity 0.15s, transform 0.15s;
+  vertical-align: middle;
+  margin-left: 4px;
+  border-radius: 50%;
+  padding: 0;
+}
+
+.speak-btn:hover {
+  opacity: 1;
+  transform: scale(1.2);
+  background: var(--accent-light);
+}
+
+/* === Dark mode === */
+[data-theme="dark"] {
+  --bg: #1a1a2e;
+  --card-bg: #16213e;
+  --text: #e0e0e0;
+  --text-secondary: #a0a0a0;
+  --border: #2a2a4a;
+  --accent: #6b9e7a;
+  --accent-hover: #5a8a68;
+  --accent-light: #1e3a2a;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+[data-theme="dark"] .segment-en { color: #d4d4d4; }
+[data-theme="dark"] .segment-en-full { color: #d4d4d4; }
+[data-theme="dark"] .segment-zh { color: #a0a0a0; }
+[data-theme="dark"] .sentence-line:hover { background: #1a2535; }
+[data-theme="dark"] .sentence-zh-text { color: #7ab88a; border-top-color: #2a3a2a; }
+[data-theme="dark"] .topic-dropdown { background: #16213e; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+[data-theme="dark"] .llm-explain-result { background: #121a2a; }
+[data-theme="dark"] .vocab-contexts { background: #121a2a; }
+[data-theme="dark"] .history-item.current { background: #1e3a2a; }
+[data-theme="dark"] .history-item:hover { background: #1e2a3a; }
+[data-theme="dark"] .back-to-today-bar { background: #2a2210; border-color: #4a3a20; color: #c0a040; }
+[data-theme="dark"] .topic-chip { background: #1e3a2a; color: #6b9e7a; }
+[data-theme="dark"] .tag-badge.tag-exam { background: #1e3a2a; color: #6b9e7a; }
+[data-theme="dark"] .form-input,
+[data-theme="dark"] .topic-input,
+[data-theme="dark"] .num-input,
+[data-theme="dark"] .search-input { background: #0d1b2a; color: #e0e0e0; }
+[data-theme="dark"] .word-panel-word { color: #6b9e7a; }
+
+/* Theme toggle button */
+.theme-toggle-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 4px 8px;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.theme-toggle-btn:hover { transform: scale(1.2); }
+
+/* === Print styles === */
+@media print {
+  body { background: #fff !important; color: #000 !important; font-size: 14pt; line-height: 2; }
+  .header, .controls-card, .side-panel, .toast, .overlay,
+  .load-more-wrap, .back-to-today-bar, .btn-primary, .btn-secondary,
+  .icon-btn, .exit-btn, .speak-btn, .vocab-export, .vocab-header,
+  .settings-card, #save-settings-btn, #settings-status,
+  #load-more-wrap, #tab-vocabulary, #tab-settings, .tabs,
+  .panel-resize-handle, .panel-drag-handle { display: none !important; }
+
+  #app { max-width: 100%; padding: 0; margin: 0; }
+  .main-layout { display: block !important; }
+  .center-content { width: 100% !important; }
+  #tab-reading { display: block !important; }
+
+  .segment-card {
+    break-inside: avoid;
+    page-break-after: auto;
+    border: none;
+    box-shadow: none;
+    padding: 12px 0;
+    margin-bottom: 20px;
+  }
+  .segment-en { font-size: 13pt; color: #000; }
+  .segment-en-full { font-size: 13pt; color: #000; }
+  .segment-zh { font-size: 11pt; color: #444; }
+  .segment-index { font-size: 10pt; color: #666; }
+  .sentence-zh-text { display: block !important; font-size: 11pt; color: #555; }
+  .sentence-line { margin-bottom: 8px; }
+  .word.vocab-word { font-weight: 700; text-decoration: underline; color: #000; }
+  .kw-tag { border: 1px solid #ccc; color: #333; }
+}

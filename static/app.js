@@ -86,6 +86,44 @@ document.addEventListener('DOMContentLoaded', () => {
     try { await fetch('/api/shutdown', { method: 'POST' }); } catch (e) {}
     window.close();
   });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    // Ctrl+Enter / Cmd+Enter: Generate
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (currentTab === 'reading') generate();
+    }
+    // Escape: Close panels
+    if (e.key === 'Escape') {
+      if (leftPanelOpen) toggleLeftPanel(false);
+      if (rightPanelOpen) toggleRightPanel(false);
+    }
+  });
+
+  // Dark mode toggle
+  const themeBtn = document.getElementById('theme-toggle-btn');
+  const savedTheme = readLS('er_theme', 'light');
+  applyTheme(savedTheme);
+
+  themeBtn.addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    const next = current === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    writeLS('er_theme', next);
+  });
+
+  function applyTheme(theme) {
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      themeBtn.innerHTML = '&#x2600;&#xFE0F;';
+      themeBtn.title = '切换日间模式';
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      themeBtn.innerHTML = '&#x1F319;';
+      themeBtn.title = '切换夜间模式';
+    }
+  }
 });
 
 // ===================== TABS =====================
@@ -627,7 +665,14 @@ async function generate() {
     const merged = allReadings[reading.date];
     renderSegments(merged.segments);
     document.getElementById('load-more-wrap').classList.remove('hidden');
-    status.textContent = `已生成 ${reading.segments.length} 段 | `;
+
+    // Estimate reading time (180 wpm for ESL learners)
+    const totalWords = merged.segments.reduce((sum, seg) => {
+      return sum + (seg.english ? seg.english.split(/\s+/).length : 0);
+    }, 0);
+    const estMinutes = Math.max(1, Math.ceil(totalWords / 180));
+
+    status.textContent = `已生成 ${reading.segments.length} 段 · 预计阅读 ${estMinutes} 分钟 | `;
     status.className = 'status success';
 
     if (data.missingVocab && data.missingVocab.length > 0) {
@@ -646,6 +691,15 @@ async function generate() {
     btn.disabled = false;
     btn.textContent = '生成英语片段';
   }
+}
+
+// ===================== TTS (Text-to-Speech) =====================
+function speakSentence(text) {
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'en-US';
+  utterance.rate = 0.85;
+  window.speechSynthesis.speak(utterance);
 }
 
 // ===================== RENDER SEGMENTS =====================
@@ -685,7 +739,17 @@ function renderSegments(segments) {
         zhText.className = 'sentence-zh-text';
         zhText.textContent = pair.zh;
 
+        const speakBtn = document.createElement('button');
+        speakBtn.className = 'speak-btn';
+        speakBtn.innerHTML = '&#x1F50A;';
+        speakBtn.title = '朗读句子';
+        speakBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          speakSentence(pair.en.replace(/\*\*/g, ''));
+        });
+
         sLine.appendChild(enText);
+        sLine.appendChild(speakBtn);
         sLine.appendChild(zhText);
         enDiv.appendChild(sLine);
       });

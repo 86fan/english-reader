@@ -2,6 +2,8 @@
 
 import re
 import json
+from datetime import date
+
 import requests
 
 
@@ -86,11 +88,15 @@ class ReadingGenerator:
         if topic == "__HOT_TOPICS__":
             display_topic = "近期热点 (choose a specific recent trending news or cultural event)"
 
-        user = f"""Generate {count} English reading segments.
+        today_str = date.today().isoformat()
+
+        user = f"""Today's date: {today_str}
+
+Generate {count} English reading segments.
 
 TOPIC: {display_topic}
 - Every segment MUST relate directly to this topic. Do NOT drift off-topic.
-- If the topic is about recent/trending/hot topics, choose a specific recent trending news or cultural event and use it as the actual topic.
+- If the topic is about recent/trending/hot topics: use a specific, real-world recent event or cultural phenomenon from your training data that would interest English learners. The date above tells you what "recent" means — choose something genuinely from around this time period, not a generic AI/tech topic unless it's truly the most relevant current event.
 
 DIFFICULTY: {diff_desc}
 WORDS PER SEGMENT: EXACTLY between {words_per_seg} (minimum) and {int(words_per_seg * 1.2)} (maximum) English words total across all sentences in the segment. You MUST reach at least {words_per_seg} words — no fewer. Do not exceed {int(words_per_seg * 1.2)}.
